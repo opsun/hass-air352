@@ -86,6 +86,14 @@ SENSOR_DESCRIPTIONS: list[Air352SensorDescription] = [
         icon="mdi:air-filter",
         category_keys=(DEVICE_TYPE_AIR,),
     ),
+    *(
+        Air352SensorDescription(
+            key=f"FilterLifeTimeDays_{slot}", name=f"Filter {slot} Days (Cloud Value)",
+            native_unit_of_measurement="d", icon="mdi:air-filter",
+            category_keys=(DEVICE_TYPE_AIR,),
+        )
+        for slot in (1, 2, 3)
+    ),
     # ── Water purifier sensors ──
     Air352SensorDescription(
         key="FinishedWaterTDS", name="Output TDS",
@@ -170,4 +178,4 @@ class Air352Sensor(CoordinatorEntity[Air352Coordinator], SensorEntity):
 
     @property
     def available(self) -> bool:
-        return self._iot_id in (self.coordinator.data or {})
+        return super().available and self._iot_id in (self.coordinator.data or {})

@@ -162,4 +162,4 @@ class Air352Fan(CoordinatorEntity[Air352Coordinator], FanEntity):
 
     @property
     def available(self) -> bool:
-        return self._iot_id in (self.coordinator.data or {})
+        return super().available and self._iot_id in (self.coordinator.data or {})

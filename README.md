@@ -33,7 +33,7 @@ Home Assistant 自定义集成，支持 [352](https://www.352air.com/) 空气净
 2. 通过阿里云 IoT 生活物联网平台（飞燕）认证获取 iotToken
 3. 通过阿里云 IoT API Gateway 获取设备列表和属性
 4. 通过 `/thing/properties/set` 下发设备控制指令
-5. 每 120 秒轮询一次设备状态
+5. 每 60 秒轮询一次设备状态
 
 ## 依赖
 

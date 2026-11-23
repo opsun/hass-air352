@@ -16,7 +16,9 @@ PLATFORMS = [Platform.FAN, Platform.SENSOR, Platform.SWITCH]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = async_get_clientsession(hass)
-    api = Air352ApiClient(session, entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD])
+    api = hass.data.get(f"{DOMAIN}_pending", {}).pop(entry.data[CONF_USERNAME], None)
+    if api is None:
+        api = Air352ApiClient(session, entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD])
     coordinator = Air352Coordinator(hass, api)
     await coordinator.async_setup()
     await coordinator.async_config_entry_first_refresh()

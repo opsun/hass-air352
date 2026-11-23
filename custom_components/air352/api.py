@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import base64
@@ -36,6 +37,7 @@ class Air352ApiError(Exception):
 class Air352ApiClient:
 
     def __init__(self, session: aiohttp.ClientSession, username: str, password: str):
+        self._auth_lock = asyncio.Lock()
         self._session = session
         self._username = username
         self._password = password
@@ -121,12 +123,13 @@ class Air352ApiClient:
             return data
         msg = data.get("message", data.get("localizedMsg", "unknown"))
         if code in self._ALI_AUTH_ERROR_CODES or "identity" in msg.lower() or "token" in msg.lower() or "session" in msg.lower():
-            if not _retried:
-                _LOGGER.info("IoT token invalid (%s: %s), re-authenticating", code, msg)
-                self._iot_token = None
-                await self.authenticate()
+            if iot_token and not _retried:
+                async with self._auth_lock:
+                    if self._iot_token == iot_token:
+                        self._iot_token = None
+                        await self.authenticate()
                 return await self._ali_gw_request(path, params, api_ver, self._iot_token, _retried=True)
-            raise Air352AuthError(f"Auth failed after retry: {code} {msg}")
+            raise Air352AuthError(f"IoT authentication rejected (code {code})")
         raise Air352ApiError(code, msg)
 
     async def _ali_oa_login(self, access_token: str) -> str:
@@ -183,7 +186,7 @@ class Air352ApiClient:
         try:
             return data["data"]["data"]["loginSuccessResult"]["sid"]
         except (KeyError, TypeError) as e:
-            raise Air352AuthError(f"loginbyoauth failed: {data}") from e
+            raise Air352AuthError("IoT login response missing session ID") from e
 
     # ── Public API ──
 
@@ -193,9 +196,11 @@ class Air352ApiClient:
         login_path = "/api/v1/enduser/login"
         headers = self._352_headers(login_path)
         url = BASE_URL_352 + login_path
-        async with self._session.post(url, headers=headers,
+        async with aiohttp.ClientSession() as login_session, login_session.post(url, headers=headers,
                 json={"account": self._username, "password": self._password},
                 timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status >= 400 and resp.content_type != "application/json":
+                raise Air352ConnectionError(f"352 login returned HTTP {resp.status}")
             data = await resp.json()
         if data.get("code") not in (0, 200):
             raise Air352AuthError(data.get("message", "login failed"))
@@ -230,7 +235,9 @@ class Air352ApiClient:
 
     async def ensure_authenticated(self) -> None:
         if not self.is_iot_token_valid():
-            await self.authenticate()
+            async with self._auth_lock:
+                if not self.is_iot_token_valid():
+                    await self.authenticate()
 
     async def get_device_list(self) -> list[dict]:
         await self.ensure_authenticated()

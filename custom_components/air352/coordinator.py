@@ -7,7 +7,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
 from .api import Air352ApiClient, Air352AuthError, Air352ConnectionError, Air352ApiError
-from .const import DOMAIN, DEFAULT_SCAN_INTERVAL
+from .const import DOMAIN, DEFAULT_SCAN_INTERVAL, DEVICE_TYPE_AIR
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,8 +26,11 @@ class Air352Coordinator(DataUpdateCoordinator):
 
     async def async_setup(self) -> None:
         try:
-            await self.api.authenticate()
+            await self.api.ensure_authenticated()
             self.devices = await self.api.get_device_list()
+            for device in self.devices:
+                if str(device.get("categoryKey", "")).casefold() == DEVICE_TYPE_AIR.casefold():
+                    device["categoryKey"] = DEVICE_TYPE_AIR
             tasks = [self.api.get_device_info(d["iotId"]) for d in self.devices]
             infos = await asyncio.gather(*tasks, return_exceptions=True)
             for dev, info in zip(self.devices, infos):
@@ -39,20 +42,18 @@ class Air352Coordinator(DataUpdateCoordinator):
             raise UpdateFailed(str(e)) from e
 
     async def _async_update_data(self) -> dict[str, dict]:
-        try:
-            tasks = [self.api.get_device_properties(d["iotId"]) for d in self.devices]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-        except Air352AuthError as e:
-            raise ConfigEntryAuthFailed(str(e)) from e
-        except (Air352ConnectionError, Air352ApiError) as e:
-            raise UpdateFailed(str(e)) from e
-
+        tasks = [self.api.get_device_properties(d["iotId"]) for d in self.devices]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         data = {}
-        for dev, result in zip(self.devices, results):
-            iot_id = dev["iotId"]
+        for device, result in zip(self.devices, results):
+            if isinstance(result, Air352AuthError):
+                raise ConfigEntryAuthFailed("352 authentication failed") from result
+            if isinstance(result, asyncio.CancelledError):
+                raise result
             if isinstance(result, Exception):
-                _LOGGER.warning("Failed to get properties for %s: %s", iot_id, result)
-                data[iot_id] = {}
-            else:
-                data[iot_id] = result
+                _LOGGER.debug("Device refresh failed (%s)", type(result).__name__)
+                continue
+            data[device["iotId"]] = result
+        if self.devices and not data:
+            raise UpdateFailed("Could not refresh any 352 devices")
         return data
